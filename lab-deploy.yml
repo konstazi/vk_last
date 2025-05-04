@@ -1,4 +1,3 @@
-
 ---
 - name: Deploy web application in Docker container
   hosts: localhost
@@ -6,11 +5,15 @@
   become: yes
   vars:
     app_user: "appadmin"
+    # Необходимо использовать переменные окружения или Ansible Vault
     app_password: "Sup3rS3cr3tP@ssw0rd123"
     download_url: "https://github.com/octocat/Hello-World/tarball/master"
+    # Добавление контрольной суммы
+    app_checksum: "sha256:9f40b519431e9754a1680244b820877ca975aa969ea4ae72798bfe3f67d0f139"
     work_dir: "/opt/webapp"
     container_name: "nginx"
-    image_version: "1.18.0"
+    # Использование современной стабильной версии
+    image_version: "1.26.3"
   tasks:
     - name: Update apt cache
       apt:
@@ -37,15 +40,35 @@
         update_password: on_create
       tags: users
  
-    - name: Disable firewall to allow all traffic
-      shell: ufw disable
-      ignore_errors: yes
-      tags: network
- 
+  # - name: Disable firewall to allow all traffic
+  #   shell: ufw disable
+  #   ignore_errors: yes
+  #   tags: network
+  
+      # Использование разрешеных служб и фиксирование ошибок
+    - name: Configure firewall
+      block:
+       - name: Enable UFW
+         ufw:
+           state: enable
+           default: deny
+           
+        - name: Allow HTTP
+          ufw:
+            rule: allow
+            port: 8080
+            proto: tcp
+      rescue:
+       - name: Logging UFW
+           debug:
+           msg: "Something goes wrong with UFW"
+          
     - name: Download application archive
       get_url:
         url: "{{ download_url }}"
         dest: "/tmp/app.tar.gz"
+        # Проверка контрольной суммы
+        checksum: "{{app_checksum}}"
       tags: download
  
     - name: Ensure working directory exists
@@ -93,9 +116,21 @@
         state: directory
         recurse: yes
         owner: "{{ app_user }}"
+        # Использование более безопасных прав
         group: "{{ app_user }}"
-        mode: '0777'
+        mode: '0755'
       tags: permissions
+
+      # Добавление прав для файлов
+    - name: Set permissions on work files
+      file:
+        path: "{{ work_dir }}"
+        state: file
+        recurse: yes
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0644'
+      tags: permissions      
  
     - name: Run Nginx container
       docker_container:
@@ -107,6 +142,9 @@
           - "8080:80"
         volumes:
           - "{{ work_dir }}:/usr/share/nginx/html:ro"
+        # Передача токена через переменные окружения
+        env:
+          SECRET_TOKEN: "{{ secret_token.stdout }}"
       tags: docker
  
     - name: Grant passwordless sudo to app user
